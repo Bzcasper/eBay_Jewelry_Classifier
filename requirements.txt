@@ -1,0 +1,11 @@
+requests
+beautifulsoup4
+pandas
+torch
+torchvision
+transformers
+tqdm
+scikit-learn
+PyQt5
+Werkzeug
+Pillow

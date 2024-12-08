@@ -1,0 +1,22 @@
+/* gui_app/resources/styles.qss */
+
+QPushButton {
+    background-color: #007BFF;
+    color: white;
+    border-radius: 5px;
+    padding: 10px;
+}
+
+QPushButton:hover {
+    background-color: #0056b3;
+}
+
+QLabel {
+    font-size: 14px;
+}
+
+QLineEdit, QTextEdit {
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    padding: 6px;
+}
