@@ -1,0 +1,91 @@
+body {
+    font-family: Arial, sans-serif;
+    margin:0;
+    padding:0;
+}
+
+nav {
+    background:#333;
+    padding:10px;
+}
+nav a {
+    color:#fff;
+    margin:0 10px;
+    text-decoration:none;
+}
+nav a:hover {
+    text-decoration:underline;
+}
+
+.container {
+    padding:20px;
+}
+
+.messages {
+    margin-bottom:20px;
+}
+.message {
+    padding:10px;
+    margin-bottom:5px;
+    border-radius:3px;
+}
+.message.info {
+    background:#d1ecf1;
+    color:#0c5460;
+}
+.message.success {
+    background:#d4edda;
+    color:#155724;
+}
+.message.danger {
+    background:#f8d7da;
+    color:#721c24;
+}
+.message.warning {
+    background:#fff3cd;
+    color:#856404;
+}
+
+.progress-section {
+    margin-top:20px;
+}
+.progress-bar-container {
+    background:#e0e0e0;
+    width:100%;
+    height:20px;
+    margin-bottom:10px;
+    border-radius:3px;
+}
+.progress-bar {
+    background:#4caf50;
+    height:100%;
+    width:0%;
+    transition: width 0.5s ease;
+    color:#fff;
+    text-align:center;
+    font-size:14px;
+    line-height:20px;
+}
+
+form label {
+    display:block;
+    margin:10px 0 5px;
+}
+form input[type=text],
+form select {
+    padding:5px;
+    width:300px;
+    margin-bottom:10px;
+}
+
+form button {
+    padding:8px 15px;
+    background:#4caf50;
+    color:#fff;
+    border:none;
+    border-radius:3px;
+    cursor:pointer;
+}
+form button:hover {
+    background:#45a049;
+}

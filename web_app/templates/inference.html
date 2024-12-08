@@ -1,0 +1,9 @@
+{% extends "layout.html" %}
+{% block content %}
+<h2>Inference</h2>
+<form method="post">
+    <label>Image Path (e.g. data/images/test_image.jpg):</label>
+    <input type="text" name="image_path" placeholder="Path to image">
+    <button type="submit">Run Inference</button>
+</form>
+{% endblock %}

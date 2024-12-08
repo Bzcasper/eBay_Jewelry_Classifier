@@ -1,0 +1,38 @@
+{% extends "layout.html" %}
+{% block content %}
+<h2>Run Scraping</h2>
+<form method="post">
+    <label>Main Category:</label>
+    <select name="category" id="category-select">
+        {% for cat in categories %}
+        <option value="{{ cat }}">{{ cat }}</option>
+        {% endfor %}
+    </select>
+    <br><br>
+    <label>Subcategory:</label>
+    <select name="subcategory" id="subcategory-select"></select>
+    <br><br>
+    <button type="submit">Start Scraping</button>
+</form>
+
+<script>
+    const subs = {{ subcategories|tojson }};
+    const catSelect=document.getElementById('category-select');
+    const subSelect=document.getElementById('subcategory-select');
+
+    function updateSubcategories(){
+        const cat=catSelect.value;
+        subSelect.innerHTML='';
+        if(subs[cat]){
+            subs[cat].forEach(sc=>{
+                const opt=document.createElement('option');
+                opt.value=sc; opt.text=sc;
+                subSelect.add(opt);
+            });
+        }
+    }
+
+    catSelect.addEventListener('change',updateSubcategories);
+    updateSubcategories();
+</script>
+{% endblock %}

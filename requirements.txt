@@ -1,11 +1,36 @@
-requests
-beautifulsoup4
-pandas
-torch
-torchvision
-transformers
-tqdm
-scikit-learn
-PyQt5
-Werkzeug
-Pillow
+# Core Python and Data
+pandas>=1.1.0
+numpy>=1.19.0
+requests>=2.25.0
+python-dotenv>=0.15.0
+json5
+
+# ML and DL frameworks
+torch>=1.10.0     # CPU-only environment, if GPU unnecessary use pip install torch==X+cpu
+torchvision>=0.11.0
+torchaudio>=0.10.0
+transformers>=4.15.0
+deepspeed>=0.6.0
+git+https://github.com/huggingface/peft.git@main   # PEFT (LoRA support)
+
+# Image processing and augmentation
+Pillow>=8.0.0
+opencv-python>=4.5.0
+albumentations>=1.0.0
+
+# Flask and web interface
+Flask>=2.0.0
+colorlog>=6.0.0
+
+# Additional utilities
+tqdm>=4.50.0
+PyQt5>=5.15.0   # If not needed remove it (was mentioned before)
+scikit-learn>=0.24.0
+
+# For caching and others if needed
+cachetools>=4.2.0
+
+# Optional: unittest is part of standard library, no need to add.
+# If mocking tests or advanced testing:
+# pytest>=6.0.0
+# pytest-mock>=3.6.0

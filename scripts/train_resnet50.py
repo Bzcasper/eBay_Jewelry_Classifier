@@ -1,111 +1,127 @@
-# scripts/train_resnet50.py
-
-import os
 import torch
 import torch.nn as nn
-from torchvision import datasets, transforms, models
-from torch.utils.data import DataLoader
-from config import (
-    DATA_CLEANED_DIR,
-    BATCH_SIZE,
-    LEARNING_RATE,
-    RESNET_EPOCHS,
-    RESNET_MODEL_PATH,
-    MODELS_DIR
-)
-from tqdm import tqdm
+import torch.utils.data as data
+from torchvision import models, transforms
+from pathlib import Path
 import logging
+import numpy as np
+import time
+import json
+from PIL import Image
+import argparse
+import deepspeed
+from config import CLEANED_DIR, MODELS_DIR, RESNET_CONFIG
+from scripts.utils.liger_optimizer import LigerOptimizer
+from peft import LoraConfig, get_peft_model
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+def pil_loader(path: str) -> Image.Image:
+    with open(path,'rb') as f:
+        img=Image.open(f).convert('RGB')
+    return img
 
-def train_resnet50():
-    # Define transformations
-    transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.RandomHorizontalFlip(),
+def load_data():
+    train_dir=CLEANED_DIR/'resnet'/'train'
+    val_dir=CLEANED_DIR/'resnet'/'val'
+    if not train_dir.exists() or not val_dir.exists():
+        logging.error("Training/Validation dirs not found. Run data_cleaning first.")
+        return None,None,None
+    transform=transforms.Compose([
+        transforms.Resize((224,224)),
         transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], 
-                             [0.229, 0.224, 0.225])
+        transforms.Normalize([0.485,0.456,0.406],[0.229,0.224,0.225])
     ])
-    
-    # Load dataset
-    train_dir = os.path.join(DATA_CLEANED_DIR, 'train')
-    val_dir = os.path.join(DATA_CLEANED_DIR, 'val')
-    
-    try:
-        train_dataset = datasets.ImageFolder(train_dir, transform=transform)
-        val_dataset = datasets.ImageFolder(val_dir, transform=transform)
-        logging.info("Loaded training and validation datasets.")
-    except Exception as e:
-        logging.error(f"Error loading datasets: {e}")
-        return
-    
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4)
-    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=4)
-    
-    # Load pre-trained ResNet-50
-    model = models.resnet50(pretrained=True)
-    
-    # Modify the final layer
-    num_ftrs = model.fc.in_features
-    num_classes = len(train_dataset.classes)
-    model.fc = nn.Linear(num_ftrs, num_classes)
-    logging.info(f"Modified ResNet-50 final layer to {num_classes} classes.")
-    
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = model.to(device)
-    logging.info(f"Using device: {device}")
-    
-    # Define loss and optimizer
-    criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
-    logging.info("Initialized loss function and optimizer.")
-    
-    # Training loop
-    for epoch in range(RESNET_EPOCHS):
+    train_dataset=data.DatasetFolder(str(train_dir),loader=pil_loader,extensions=("jpg",),transform=transform)
+    val_dataset=data.DatasetFolder(str(val_dir),loader=pil_loader,extensions=("jpg",),transform=transform)
+    train_loader=data.DataLoader(train_dataset,batch_size=RESNET_CONFIG['batch_size'],shuffle=True,num_workers=RESNET_CONFIG['num_workers'],pin_memory=RESNET_CONFIG['pin_memory'])
+    val_loader=data.DataLoader(val_dataset,batch_size=RESNET_CONFIG['batch_size'],shuffle=False,num_workers=RESNET_CONFIG['num_workers'],pin_memory=RESNET_CONFIG['pin_memory'])
+    return train_loader,val_loader,len(train_dataset.classes)
+
+def apply_lora_to_resnet(model: nn.Module, rank: int):
+    # LoRA on final fc layer as demonstration.
+    lora_config=LoraConfig(r=rank,lora_alpha=32,lora_dropout=0.1,bias='none',task_type='CAUSAL_LM')
+    model=get_peft_model(model,lora_config)
+    logging.info("LoRA layers added to ResNet-50 final layer.")
+    return model
+
+def validate_model(model, val_loader, engine, device):
+    model.eval()
+    correct=0
+    total=0
+    with torch.no_grad():
+        for inputs,labels in val_loader:
+            inputs,labels=inputs.to(device),labels.to(device)
+            outputs=engine(inputs)
+            _,preds=torch.max(outputs,1)
+            correct+=torch.sum(preds==labels).item()
+            total+=labels.size(0)
+    return correct/total if total>0 else 0.0
+
+def save_checkpoint(model,best_acc):
+    checkpoint_dir=MODELS_DIR/'resnet50_lora_deepspeed_best'
+    checkpoint_dir.mkdir(parents=True,exist_ok=True)
+    checkpoint_path=checkpoint_dir/'resnet50_best.pth'
+    model=model.merge_and_unload()
+    torch.save(model.state_dict(),checkpoint_path)
+    logging.info(f"Best model saved to {checkpoint_path} with Val Acc: {best_acc:.4f}")
+    metrics_path=checkpoint_dir/'metrics.json'
+    with metrics_path.open('w')as f:
+        json.dump({'best_val_acc':best_acc},f,indent=2)
+    logging.debug(f"Metrics saved to {metrics_path}")
+
+def train_model(train_loader,val_loader,num_classes,engine,device):
+    criterion=nn.CrossEntropyLoss().to(device)
+    best_acc=0.0
+    epochs_no_improve=0
+    early_stopping=RESNET_CONFIG['early_stopping_patience']
+    epochs=RESNET_CONFIG['epochs']
+    logging.info(f"Training ResNet50 for {epochs} epochs on CPU with LoRA, Liger, DeepSpeed.")
+    since=time.time()
+    model=engine.module
+    for epoch in range(epochs):
+        logging.debug(f"Epoch {epoch+1}/{epochs}")
         model.train()
-        running_loss = 0.0
-        for inputs, labels in tqdm(train_loader, desc=f"Training Epoch {epoch+1}/{RESNET_EPOCHS}"):
-            inputs, labels = inputs.to(device), labels.to(device)
-            
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
-            
-            running_loss += loss.item() * inputs.size(0)
-        
-        epoch_loss = running_loss / len(train_loader.dataset)
-        logging.info(f"Epoch {epoch+1}/{RESNET_EPOCHS} - Training Loss: {epoch_loss:.4f}")
-        
-        # Validation
-        model.eval()
-        correct = 0
-        total = 0
-        with torch.no_grad():
-            for inputs, labels in tqdm(val_loader, desc="Validation"):
-                inputs, labels = inputs.to(device), labels.to(device)
-                outputs = model(inputs)
-                _, preds = torch.max(outputs, 1)
-                correct += (preds == labels).sum().item()
-                total += labels.size(0)
-        
-        accuracy = correct / total
-        logging.info(f"Validation Accuracy: {accuracy * 100:.2f}%")
-    
-    # Save the trained model
-    try:
-        if not os.path.exists(MODELS_DIR):
-            os.makedirs(MODELS_DIR)
-        torch.save(model.state_dict(), RESNET_MODEL_PATH)
-        logging.info(f"ResNet-50 model saved to {RESNET_MODEL_PATH}")
-    except Exception as e:
-        logging.error(f"Error saving model: {e}")
+        running_loss=0.0
+        for inputs,labels in train_loader:
+            inputs,labels=inputs.to(device),labels.to(device)
+            engine.optimizer.zero_grad()
+            outputs=engine(inputs)
+            loss=criterion(outputs,labels)
+            engine.backward(loss)
+            engine.step()
+            running_loss+=loss.item()*inputs.size(0)
+        train_loss=running_loss/len(train_loader.dataset)
+        val_acc=validate_model(model,val_loader,engine,device)
+        logging.info(f"Epoch {epoch+1}/{epochs} - Train Loss: {train_loss:.4f}, Val Acc: {val_acc:.4f}")
+        if val_acc>best_acc:
+            best_acc=val_acc
+            epochs_no_improve=0
+            save_checkpoint(model,best_acc)
+        else:
+            epochs_no_improve+=1
+            if epochs_no_improve>=early_stopping:
+                logging.info("No improvement, early stopping.")
+                break
+    time_elapsed=time.time()-since
+    logging.info(f"Training complete in {time_elapsed:.2f}s. Best Val Acc:{best_acc:.4f}")
 
-def main():
-    train_resnet50()
+if __name__=='__main__':
+    logging.info("Loading data for ResNet50 training...")
+    train_loader,val_loader,num_classes=load_data()
+    if train_loader is None or val_loader is None or num_classes is None:
+        logging.error("Data loading failed.")
+        exit(1)
 
-if __name__ == '__main__':
-    main()
+    parser=argparse.ArgumentParser()
+    parser.add_argument("--deepspeed_config",type=str,default="scripts/utils/deepspeed_config.json")
+    args=parser.parse_args()
+
+    device=torch.device('cpu')
+    model=models.resnet50(pretrained=False)
+    num_ftrs=model.fc.in_features
+    model.fc=nn.Linear(num_ftrs,num_classes)
+    from deepspeed import initialize
+    model=apply_lora_to_resnet(model,rank=4)
+    optimizer=LigerOptimizer(model.parameters(),lr=RESNET_CONFIG['learning_rate'],weight_decay=RESNET_CONFIG['weight_decay'])
+    model_engine,optimizer,_,_=initialize(model=model,optimizer=optimizer,model_parameters=model.parameters(),config=args.deepspeed_config)
+    train_model(train_loader,val_loader,num_classes,model_engine,device)
+    logging.info("ResNet50 training script completed.")

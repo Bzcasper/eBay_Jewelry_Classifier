@@ -1,0 +1,12 @@
+{% extends "layout.html" %}
+{% block content %}
+<h2>Train Models</h2>
+<form method="post">
+    <label>Select Model:</label>
+    <select name="model_type">
+        <option value="resnet">ResNet50 (Vision)</option>
+        <option value="gpt2">GPT-2 (Text)</option>
+    </select>
+    <button type="submit">Start Training</button>
+</form>
+{% endblock %}
